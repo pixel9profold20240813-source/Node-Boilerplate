@@ -1,25 +1,51 @@
-import app from "./app";
+import http from "node:http";
+import { startBot } from "./bot";
 import { logger } from "./lib/logger";
+import { getTotalUsers } from "./lib/xp";
 
-const rawPort = process.env["PORT"];
+const token = process.env["DISCORD_BOT_TOKEN"];
 
-if (!rawPort) {
+if (!token) {
   throw new Error(
-    "PORT environment variable is required but was not provided.",
+    "DISCORD_BOT_TOKEN environment variable is required but was not provided.",
   );
 }
 
-const port = Number(rawPort);
+const rawPort = process.env["PORT"];
+const port = rawPort ? Number(rawPort) : 8080;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
+const healthServer = http.createServer((req, res) => {
+  if (req.url === "/api/healthz" || req.url === "/healthz") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        users: getTotalUsers(),
+      }),
+    );
+    return;
   }
-
-  logger.info({ port }, "Server listening");
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Not found");
 });
+
+healthServer.listen(port, () => {
+  logger.info({ port }, "Health server listening");
+});
+
+startBot(token).catch((err) => {
+  logger.error({ err }, "Failed to start Discord bot");
+  process.exit(1);
+});
+
+const shutdown = (signal: string) => {
+  logger.info({ signal }, "Shutting down");
+  healthServer.close(() => process.exit(0));
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
