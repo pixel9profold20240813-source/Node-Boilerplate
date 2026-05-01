@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "./logger";
+import { getMultiplier } from "./multiplier";
 
 export interface UserXp {
   userId: string;
@@ -87,6 +88,8 @@ export function progressForXp(xp: number): {
 
 export interface AwardResult {
   awarded: number;
+  baseAwarded: number;
+  multiplier: number;
   totalXp: number;
   previousLevel: number;
   newLevel: number;
@@ -103,8 +106,10 @@ export async function awardXp(
   const previousXp = existing?.xp ?? 0;
   const isFirstMessage = !existing;
   const previousLevel = levelForXp(previousXp);
-  const awarded =
+  const multiplier = getMultiplier();
+  const baseAwarded =
     Math.floor(Math.random() * (MAX_AWARD - MIN_AWARD + 1)) + MIN_AWARD;
+  const awarded = baseAwarded * multiplier;
   const totalXp = previousXp + awarded;
   const newLevel = levelForXp(totalXp);
 
@@ -119,6 +124,8 @@ export async function awardXp(
 
   return {
     awarded,
+    baseAwarded,
+    multiplier,
     totalXp,
     previousLevel,
     newLevel,

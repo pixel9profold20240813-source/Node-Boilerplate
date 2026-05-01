@@ -5,8 +5,10 @@ import {
   GuildMember,
   SlashCommandBuilder,
   type SlashCommandOptionsOnlyBuilder,
+  type SlashCommandSubcommandsOnlyBuilder,
 } from "discord.js";
 import { generateLeaderboardCard, generateProfileCard } from "./lib/card";
+import { EVENT_MULTIPLIER, isEventActive, startEvent, stopEvent } from "./lib/multiplier";
 import { fetchMember, updateRoles } from "./lib/roles";
 import {
   adjustXp,
@@ -19,7 +21,7 @@ import {
 } from "./lib/xp";
 
 export interface BotCommand {
-  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder;
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }
 
@@ -121,7 +123,14 @@ const rankCommand: BotCommand = {
       name: "rank-card.png",
     });
 
-    await interaction.editReply({ files: [attachment] });
+    const eventBanner = isEventActive()
+      ? `🔥 **XP Event Active: ${EVENT_MULTIPLIER}x Boost!**`
+      : undefined;
+
+    await interaction.editReply({
+      content: eventBanner,
+      files: [attachment],
+    });
   },
 };
 
@@ -376,6 +385,65 @@ const setLevelCommand: BotCommand = {
   },
 };
 
+// ── /eventxp ──────────────────────────────────────────────────────────────────
+
+const eventXpCommand: BotCommand = {
+  data: new SlashCommandBuilder()
+    .setName("eventxp")
+    .setDescription("[Admin] Manage XP multiplier events")
+    .addSubcommand((sub) =>
+      sub
+        .setName("start")
+        .setDescription(`Start a ${EVENT_MULTIPLIER}x XP event`),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("stop").setDescription("Stop the current XP event"),
+    ),
+  async execute(interaction) {
+    if (!isAdmin(interaction)) {
+      await interaction.reply({
+        content: "You need the **Admin** role to use this command.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "start") {
+      if (isEventActive()) {
+        await interaction.reply({
+          content: `🔥 An XP event is already active (**${EVENT_MULTIPLIER}x** multiplier).`,
+          ephemeral: true,
+        });
+        return;
+      }
+      startEvent();
+      const embed = new EmbedBuilder()
+        .setTitle("🔥 XP Event Started!")
+        .setColor(0xff7700)
+        .setDescription(
+          `All XP gains are now **${EVENT_MULTIPLIER}x** the normal amount!\n\nChat away to earn boosted XP. Use \`/eventxp stop\` to end the event.`,
+        );
+      await interaction.reply({ embeds: [embed] });
+    } else if (sub === "stop") {
+      if (!isEventActive()) {
+        await interaction.reply({
+          content: "There is no active XP event to stop.",
+          ephemeral: true,
+        });
+        return;
+      }
+      stopEvent();
+      const embed = new EmbedBuilder()
+        .setTitle("XP Event Ended")
+        .setColor(0x99aab5)
+        .setDescription("The XP event has ended. XP is back to **1x** normal.");
+      await interaction.reply({ embeds: [embed] });
+    }
+  },
+};
+
 export const commands: BotCommand[] = [
   levelCommand,
   rankCommand,
@@ -384,4 +452,5 @@ export const commands: BotCommand[] = [
   removeXpCommand,
   xpResetCommand,
   setLevelCommand,
+  eventXpCommand,
 ];

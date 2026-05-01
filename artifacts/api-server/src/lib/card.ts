@@ -1,4 +1,5 @@
 import { createCanvas, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
+import { progressForXp } from "./xp";
 
 export interface CardOptions {
   username: string;
@@ -248,11 +249,13 @@ export interface LeaderboardCardOptions {
 export async function generateLeaderboardCard(
   opts: LeaderboardCardOptions,
 ): Promise<Buffer> {
-  const ROW_H = 72;
+  const ROW_H = 76;
+  const ROW_GAP = 6;
   const PADDING = 16;
   const AV = 48;
-  const cardH = PADDING + opts.entries.length * (ROW_H + 4) + PADDING;
-  const cardW = 700;
+  const TITLE_H = 60; // space reserved for title text + gap before first row
+  const cardW = 720;
+  const cardH = TITLE_H + opts.entries.length * (ROW_H + ROW_GAP) - ROW_GAP + PADDING;
 
   const canvas = createCanvas(cardW, cardH);
   const ctx = canvas.getContext("2d");
@@ -265,14 +268,14 @@ export async function generateLeaderboardCard(
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 26px sans-serif";
   ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText("🏆  XP Leaderboard", cardW / 2, PADDING + 28);
+  ctx.textBaseline = "middle";
+  ctx.fillText("🏆  XP Leaderboard", cardW / 2, TITLE_H / 2);
 
-  const startY = PADDING + 44;
+  const startY = TITLE_H;
 
   for (let i = 0; i < opts.entries.length; i++) {
     const entry = opts.entries[i];
-    const rowY = startY + i * (ROW_H + 4);
+    const rowY = startY + i * (ROW_H + ROW_GAP);
     const [colorA] = levelColor(entry.level);
 
     // Row background
@@ -344,7 +347,7 @@ export async function generateLeaderboardCard(
     );
 
     // Mini progress bar
-    const miniBarX = cardW - 180 - PADDING;
+    const miniBarX = cardW - 184 - PADDING;
     const miniBarY = rowY + ROW_H / 2 - 6;
     const miniBarW = 160;
     const miniBarH = 12;
@@ -353,7 +356,6 @@ export async function generateLeaderboardCard(
     ctx.fillStyle = "#484b51";
     ctx.fill();
 
-    const { progressForXp } = await import("./xp");
     const prog = progressForXp(entry.xp);
     const fillRatio =
       prog.xpNeededForNext > 0
