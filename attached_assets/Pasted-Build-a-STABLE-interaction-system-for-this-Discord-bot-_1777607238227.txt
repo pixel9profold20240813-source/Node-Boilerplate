@@ -1,0 +1,121 @@
+Build a STABLE interaction system for this Discord bot to permanently fix intermittent "未受回應" issues and prevent occasional full command failure.
+
+CURRENT PROBLEM:
+- Bot is online but slash commands sometimes randomly fail
+- "未受回應" appears intermittently
+- System is unstable under load
+- Some interactions hang or silently fail
+
+GOAL:
+Create a robust interaction stability layer that guarantees:
+- No slash command ever hangs silently
+- No "未受回應" under normal conditions
+- Safe recovery from any error
+- No single failure breaks all commands
+
+---
+
+1. SAFE INTERACTION HANDLER (CRITICAL)
+
+Modify interactionCreate handler to include full stability layer:
+
+- Must ensure ONLY ONE handler exists
+- Must log every interaction received
+- Must NEVER allow a single command to block others
+
+Structure:
+
+client.on("interactionCreate", async (interaction) => {
+    console.log("INTERACTION RECEIVED:", interaction.commandName);
+
+    try {
+        if (!interaction.isChatInputCommand()) return;
+
+        // SAFETY: ensure reply is always initialized
+        const deferPromise = interaction.deferReply().catch((err) => {
+            console.error("Defer failed:", err);
+        });
+
+        // Prevent hanging interactions
+        const timeout = setTimeout(() => {
+            console.error("⚠️ Interaction timeout fallback triggered:", interaction.commandName);
+        }, 3000);
+
+        await deferPromise;
+
+        await handleCommand(interaction);
+
+        clearTimeout(timeout);
+
+        console.log("[COMMAND EXECUTED]:", interaction.commandName);
+
+    } catch (err) {
+        console.error("INTERACTION ERROR:", err);
+
+        try {
+            if (interaction.deferred) {
+                await interaction.editReply("系統錯誤");
+            } else {
+                await interaction.reply({ content: "系統錯誤", ephemeral: true });
+            }
+        } catch (e) {
+            console.error("FATAL REPLY FAILURE:", e);
+        }
+    }
+});
+
+---
+
+2. COMMAND SAFETY RULES
+
+All commands MUST:
+- NEVER call deferReply() themselves
+- ONLY use editReply() for responses
+- Assume interaction is already deferred by handler
+- NEVER block before response
+
+---
+
+3. PREVENT HANGING OPERATIONS
+
+Wrap any of these with safety limits:
+- Canvas generation
+- Role updates
+- XP calculations
+- Database/JSON reads
+
+Use:
+
+Promise.race([
+    operation(),
+    timeoutReject(2500ms)
+])
+
+---
+
+4. ROLE UPDATE SAFETY
+
+Role updates must NEVER block interaction:
+
+- Use setImmediate or fire-and-forget pattern
+- Always wrap in try/catch
+- Must NOT delay editReply
+
+---
+
+5. GLOBAL CRASH PROTECTION
+
+Add:
+
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
+
+---
+
+6. SYSTEM GOAL
+
+After this fix:
+- No intermittent "未受回應"
+- No random command failure
+- No blocking interaction pipeline
+- Bot remains stable under load

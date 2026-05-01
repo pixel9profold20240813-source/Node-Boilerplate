@@ -25,6 +25,15 @@ import {
   xpForLevel,
 } from "./lib/xp";
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout: ${label} exceeded ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
 export interface BotCommand {
   data:
     | SlashCommandBuilder
@@ -50,9 +59,12 @@ function fireRoleUpdate(
   level: number,
 ): void {
   if (!interaction.guild) return;
-  fetchMember(interaction.guild, userId)
-    .then((member) => member && updateRoles(member, level))
-    .catch(() => {});
+  const guild = interaction.guild;
+  setImmediate(() => {
+    fetchMember(guild, userId)
+      .then((member) => member && updateRoles(member, level))
+      .catch(() => {});
+  });
 }
 
 // ── /level ────────────────────────────────────────────────────────────────────
@@ -84,15 +96,19 @@ const levelCommand: BotCommand = {
       target.displayAvatarURL({ extension: "png", size: 256 }) ??
       defaultAvatarUrl(target.id);
 
-    const cardBuffer = await generateProfileCard({
-      username: target.username,
-      avatarUrl,
-      level,
-      rank,
-      currentXp: record.xp,
-      xpIntoLevel,
-      xpNeededForNext,
-    });
+    const cardBuffer = await withTimeout(
+      generateProfileCard({
+        username: target.username,
+        avatarUrl,
+        level,
+        rank,
+        currentXp: record.xp,
+        xpIntoLevel,
+        xpNeededForNext,
+      }),
+      8000,
+      "generateProfileCard",
+    );
 
     const attachment = new AttachmentBuilder(cardBuffer, {
       name: "level-card.png",
@@ -124,15 +140,19 @@ const rankCommand: BotCommand = {
       interaction.user.displayAvatarURL({ extension: "png", size: 256 }) ??
       defaultAvatarUrl(interaction.user.id);
 
-    const cardBuffer = await generateProfileCard({
-      username: interaction.user.username,
-      avatarUrl,
-      level,
-      rank,
-      currentXp: record.xp,
-      xpIntoLevel,
-      xpNeededForNext,
-    });
+    const cardBuffer = await withTimeout(
+      generateProfileCard({
+        username: interaction.user.username,
+        avatarUrl,
+        level,
+        rank,
+        currentXp: record.xp,
+        xpIntoLevel,
+        xpNeededForNext,
+      }),
+      8000,
+      "generateProfileCard/rank",
+    );
 
     const attachment = new AttachmentBuilder(cardBuffer, {
       name: "rank-card.png",
@@ -180,7 +200,11 @@ const leaderboardCommand: BotCommand = {
       }),
     );
 
-    const cardBuffer = await generateLeaderboardCard({ entries });
+    const cardBuffer = await withTimeout(
+      generateLeaderboardCard({ entries }),
+      10000,
+      "generateLeaderboardCard",
+    );
     const attachment = new AttachmentBuilder(cardBuffer, {
       name: "leaderboard.png",
     });

@@ -4,10 +4,12 @@ import { logger } from "./lib/logger";
 import { getTotalUsers } from "./lib/xp";
 
 process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION:", reason);
   logger.error({ reason }, "Unhandled promise rejection");
 });
 
 process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
   logger.error({ err }, "Uncaught exception");
 });
 

@@ -12,6 +12,8 @@ import { logger } from "./lib/logger";
 import { updateRoles } from "./lib/roles";
 import { awardXp, loadXpStore } from "./lib/xp";
 
+const INTERACTION_TIMEOUT_MS = 3000;
+
 export async function startBot(token: string): Promise<Client> {
   await loadXpStore();
 
@@ -36,19 +38,28 @@ export async function startBot(token: string): Promise<Client> {
   });
 
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-    try {
-      console.log(
-        `[INTERACTION] type=${interaction.type} isChatInput=${interaction.isChatInputCommand()}`,
-      );
+    console.log(
+      `INTERACTION RECEIVED: ${interaction.isChatInputCommand() ? interaction.commandName : `type=${interaction.type}`}`,
+    );
 
+    try {
       if (!interaction.isChatInputCommand()) return;
 
-      console.log(`INTERACTION RECEIVED: ${interaction.commandName}`);
+      const deferPromise = interaction.deferReply().catch((err) => {
+        console.error("Defer failed:", err);
+      });
 
-      await interaction.deferReply();
+      const timeout = setTimeout(() => {
+        console.error(
+          `⚠️ Interaction timeout fallback triggered: ${interaction.commandName}`,
+        );
+      }, INTERACTION_TIMEOUT_MS);
+
+      await deferPromise;
 
       const command = commandMap.get(interaction.commandName);
       if (!command) {
+        clearTimeout(timeout);
         logger.warn(
           { commandName: interaction.commandName },
           "Unknown command received",
@@ -59,11 +70,18 @@ export async function startBot(token: string): Promise<Client> {
 
       await command.execute(interaction);
 
-      console.log(`[COMMAND EXECUTED] ${interaction.commandName}`);
+      clearTimeout(timeout);
+
+      console.log(`[COMMAND EXECUTED]: ${interaction.commandName}`);
     } catch (err) {
       console.error("INTERACTION ERROR:", err);
       logger.error(
-        { err, commandName: interaction.isChatInputCommand() ? interaction.commandName : "?" },
+        {
+          err,
+          commandName: interaction.isChatInputCommand()
+            ? interaction.commandName
+            : "?",
+        },
         "Interaction handler error",
       );
       try {
@@ -74,8 +92,8 @@ export async function startBot(token: string): Promise<Client> {
             await interaction.reply({ content: "系統錯誤", ephemeral: true });
           }
         }
-      } catch {
-        /* suppress */
+      } catch (e) {
+        console.error("FATAL REPLY FAILURE:", e);
       }
     }
   });
@@ -84,27 +102,28 @@ export async function startBot(token: string): Promise<Client> {
     if (message.author.bot) return;
     if (!message.guild) return;
 
-    const result = await awardXp(message.author.id, message.author.username);
+    try {
+      const result = await awardXp(message.author.id, message.author.username);
 
-    if ((result.leveledUp || result.isFirstMessage) && message.member) {
-      updateRoles(message.member, result.newLevel).catch((err) => {
-        logger.warn({ err, userId: message.author.id }, "Role update failed");
-      });
-    }
-
-    if (result.leveledUp) {
-      try {
-        if (message.channel.isSendable()) {
-          await message.channel.send(
-            `🎉 ${message.author.toString()} just reached **level ${result.newLevel}**!`,
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          { err, channelId: message.channelId },
-          "Could not send level-up message",
-        );
+      if ((result.leveledUp || result.isFirstMessage) && message.member) {
+        setImmediate(() => {
+          updateRoles(message.member!, result.newLevel).catch((err) => {
+            logger.warn({ err, userId: message.author.id }, "Role update failed");
+          });
+        });
       }
+
+      if (result.leveledUp) {
+        if (message.channel.isSendable()) {
+          message.channel
+            .send(`🎉 ${message.author.toString()} just reached **level ${result.newLevel}**!`)
+            .catch((err) => {
+              logger.warn({ err, channelId: message.channelId }, "Could not send level-up message");
+            });
+        }
+      }
+    } catch (err) {
+      logger.error({ err, userId: message.author.id }, "Message XP handler error");
     }
   });
 
