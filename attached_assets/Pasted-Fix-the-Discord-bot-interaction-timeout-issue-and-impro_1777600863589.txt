@@ -1,0 +1,88 @@
+Fix the Discord bot interaction timeout issue and improve overall stability.
+
+CURRENT PROBLEM:
+All slash commands sometimes show "該申請未受回應" (interaction not responded).
+This is caused by Discord interaction timeout (bot not replying within 3 seconds), especially on image-based commands using @napi-rs/canvas.
+
+REQUIRED FIXES:
+
+1. Fix ALL interaction timeout issues
+- Every slash command MUST immediately use:
+  await interaction.deferReply();
+
+- No heavy computation, canvas rendering, XP calculation, or role updates should happen before deferReply.
+
+- All commands must respond using:
+  await interaction.editReply()
+
+NOT interaction.reply() for long tasks.
+
+---
+
+2. Fix canvas image commands (/rank, /leaderboard, profile cards)
+- All canvas generation MUST be asynchronous
+- Ensure deferReply is called BEFORE any canvas processing
+- Return images only via editReply({ files: [...] })
+
+Example structure:
+await interaction.deferReply();
+const image = await generateCanvasImage();
+await interaction.editReply({ files: [image] });
+
+---
+
+3. Fix leaderboard rendering stability
+- Ensure no image cutoff or missing users
+- Canvas height must be dynamically calculated:
+  TITLE_HEIGHT + (ENTRY_COUNT × ROW_HEIGHT + GAP) + PADDING
+- Ensure max 10 users displayed but fully visible
+- Prevent overflow of avatars, text, or progress bars
+
+---
+
+4. Ensure XP system stability with multiplier
+- XP system must always use:
+  XP = baseXP × xpMultiplier
+
+- multiplier applies to:
+  chat XP
+  event XP system
+  all bonus systems
+
+---
+
+5. Fix /eventxp system (Admin only)
+- /eventxp start → sets multiplier to 3
+- /eventxp stop → resets multiplier to 1
+- Must prevent multiple active events at same time
+- Must check Admin role before execution
+
+---
+
+6. Add safety & crash prevention
+- Add global error handlers:
+  process.on("unhandledRejection", console.error);
+  process.on("uncaughtException", console.error);
+
+- Ensure bot does not crash silently and keeps running
+
+---
+
+7. Ensure role system still works correctly
+- Beginner role for level < 2
+- Lv2 role for level ≥ 2
+- Role updates must be awaited properly
+- Must not block interaction response
+
+---
+
+8. IMPORTANT RULE
+NEVER perform long operations before deferReply.
+All slash commands must ALWAYS respond within 3 seconds using deferReply first.
+
+---
+
+GOAL:
+- Eliminate "interaction not responded" errors completely
+- Ensure canvas-based commands never timeout
+- Ensure XP + role system remains stable under load

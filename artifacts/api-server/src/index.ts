@@ -3,6 +3,14 @@ import { startBot } from "./bot";
 import { logger } from "./lib/logger";
 import { getTotalUsers } from "./lib/xp";
 
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Unhandled promise rejection");
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception");
+});
+
 const token = process.env["DISCORD_BOT_TOKEN"];
 
 if (!token) {
@@ -21,12 +29,7 @@ if (Number.isNaN(port) || port <= 0) {
 const healthServer = http.createServer((req, res) => {
   if (req.url === "/api/healthz" || req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        status: "ok",
-        users: getTotalUsers(),
-      }),
-    );
+    res.end(JSON.stringify({ status: "ok", users: getTotalUsers() }));
     return;
   }
   res.writeHead(404, { "Content-Type": "text/plain" });

@@ -8,7 +8,12 @@ import {
   type SlashCommandSubcommandsOnlyBuilder,
 } from "discord.js";
 import { generateLeaderboardCard, generateProfileCard } from "./lib/card";
-import { EVENT_MULTIPLIER, isEventActive, startEvent, stopEvent } from "./lib/multiplier";
+import {
+  EVENT_MULTIPLIER,
+  isEventActive,
+  startEvent,
+  stopEvent,
+} from "./lib/multiplier";
 import { fetchMember, updateRoles } from "./lib/roles";
 import {
   adjustXp,
@@ -21,7 +26,10 @@ import {
 } from "./lib/xp";
 
 export interface BotCommand {
-  data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder;
+  data:
+    | SlashCommandBuilder
+    | SlashCommandOptionsOnlyBuilder
+    | SlashCommandSubcommandsOnlyBuilder;
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }
 
@@ -34,6 +42,17 @@ function isAdmin(interaction: ChatInputCommandInteraction): boolean {
 function defaultAvatarUrl(userId: string): string {
   const index = (BigInt(userId) >> 22n) % 6n;
   return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
+
+function fireRoleUpdate(
+  interaction: ChatInputCommandInteraction,
+  userId: string,
+  level: number,
+): void {
+  if (!interaction.guild) return;
+  fetchMember(interaction.guild, userId)
+    .then((member) => member && updateRoles(member, level))
+    .catch(() => {});
 }
 
 // ── /level ────────────────────────────────────────────────────────────────────
@@ -119,18 +138,13 @@ const rankCommand: BotCommand = {
       xpNeededForNext,
     });
 
-    const attachment = new AttachmentBuilder(cardBuffer, {
-      name: "rank-card.png",
-    });
+    const attachment = new AttachmentBuilder(cardBuffer, { name: "rank-card.png" });
 
     const eventBanner = isEventActive()
       ? `🔥 **XP Event Active: ${EVENT_MULTIPLIER}x Boost!**`
       : undefined;
 
-    await interaction.editReply({
-      content: eventBanner,
-      files: [attachment],
-    });
+    await interaction.editReply({ content: eventBanner, files: [attachment] });
   },
 };
 
@@ -145,9 +159,7 @@ const leaderboardCommand: BotCommand = {
 
     const top = getLeaderboard(10);
     if (top.length === 0) {
-      await interaction.editReply(
-        "No XP has been earned yet. Be the first!",
-      );
+      await interaction.editReply("No XP has been earned yet. Be the first!");
       return;
     }
 
@@ -162,20 +174,12 @@ const leaderboardCommand: BotCommand = {
         } catch {
           /* use default */
         }
-        return {
-          rank: u.rank,
-          username: u.username,
-          avatarUrl,
-          level: u.level,
-          xp: u.xp,
-        };
+        return { rank: u.rank, username: u.username, avatarUrl, level: u.level, xp: u.xp };
       }),
     );
 
     const cardBuffer = await generateLeaderboardCard({ entries });
-    const attachment = new AttachmentBuilder(cardBuffer, {
-      name: "leaderboard.png",
-    });
+    const attachment = new AttachmentBuilder(cardBuffer, { name: "leaderboard.png" });
 
     await interaction.editReply({ files: [attachment] });
   },
@@ -202,11 +206,10 @@ const addXpCommand: BotCommand = {
         .setRequired(false),
     ),
   async execute(interaction) {
+    await interaction.deferReply();
+
     if (!isAdmin(interaction)) {
-      await interaction.reply({
-        content: "You need the **Admin** role to use this command.",
-        ephemeral: true,
-      });
+      await interaction.editReply("You need the **Admin** role to use this command.");
       return;
     }
 
@@ -214,22 +217,19 @@ const addXpCommand: BotCommand = {
     const amount = interaction.options.getInteger("amount", true);
     const result = await adjustXp(target.id, target.username, amount);
 
-    if (interaction.guild) {
-      const member = await fetchMember(interaction.guild, target.id);
-      if (member) await updateRoles(member, result.newLevel);
-    }
+    fireRoleUpdate(interaction, target.id, result.newLevel);
 
     const embed = new EmbedBuilder()
       .setTitle("XP Added")
       .setColor(0x57f287)
       .setThumbnail(target.displayAvatarURL())
       .setDescription(
-        `Added **+${amount} XP** to ${target.toString()}.\n` +
+        `Added **+${amount.toLocaleString()} XP** to ${target.toString()}.\n` +
           `New total: **${result.totalXp.toLocaleString()} XP** — Level **${result.newLevel}**` +
           (result.leveledUp ? `\n🎉 They leveled up!` : ""),
       );
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -254,35 +254,32 @@ const removeXpCommand: BotCommand = {
         .setRequired(false),
     ),
   async execute(interaction) {
+    await interaction.deferReply();
+
     if (!isAdmin(interaction)) {
-      await interaction.reply({
-        content: "You need the **Admin** role to use this command.",
-        ephemeral: true,
-      });
+      await interaction.editReply("You need the **Admin** role to use this command.");
       return;
     }
 
     const target = interaction.options.getUser("user") ?? interaction.user;
     const amount = interaction.options.getInteger("amount", true);
+    const prevXp = getUserXp(target.id)?.xp ?? 0;
+    const actualRemoved = Math.min(amount, prevXp);
     const result = await adjustXp(target.id, target.username, -amount);
-    const actualRemoved = amount - Math.max(0, -result.delta + result.totalXp);
 
-    if (interaction.guild) {
-      const member = await fetchMember(interaction.guild, target.id);
-      if (member) await updateRoles(member, result.newLevel);
-    }
+    fireRoleUpdate(interaction, target.id, result.newLevel);
 
     const embed = new EmbedBuilder()
       .setTitle("XP Removed")
       .setColor(0xed4245)
       .setThumbnail(target.displayAvatarURL())
       .setDescription(
-        `Removed **-${actualRemoved} XP** from ${target.toString()}.\n` +
+        `Removed **-${actualRemoved.toLocaleString()} XP** from ${target.toString()}.\n` +
           `New total: **${result.totalXp.toLocaleString()} XP** — Level **${result.newLevel}**` +
           (result.leveledDown ? `\n⬇️ They lost a level.` : ""),
       );
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -293,17 +290,13 @@ const xpResetCommand: BotCommand = {
     .setName("xpreset")
     .setDescription("[Admin] Reset a user's XP to 0")
     .addUserOption((opt) =>
-      opt
-        .setName("user")
-        .setDescription("The user to reset")
-        .setRequired(true),
+      opt.setName("user").setDescription("The user to reset").setRequired(true),
     ),
   async execute(interaction) {
+    await interaction.deferReply();
+
     if (!isAdmin(interaction)) {
-      await interaction.reply({
-        content: "You need the **Admin** role to use this command.",
-        ephemeral: true,
-      });
+      await interaction.editReply("You need the **Admin** role to use this command.");
       return;
     }
 
@@ -313,21 +306,19 @@ const xpResetCommand: BotCommand = {
     const prevLevel = levelForXp(prevXp);
 
     await adjustXp(target.id, target.username, -prevXp);
-
-    if (interaction.guild) {
-      const member = await fetchMember(interaction.guild, target.id);
-      if (member) await updateRoles(member, 0);
-    }
+    fireRoleUpdate(interaction, target.id, 0);
 
     const embed = new EmbedBuilder()
       .setTitle("XP Reset")
       .setColor(0xfaa61a)
       .setThumbnail(target.displayAvatarURL())
       .setDescription(
-        `Reset **${target.toString()}** from **${prevXp.toLocaleString()} XP** (Level ${prevLevel}) back to **0 XP** (Level 0).\nTheir role has been set to **Beginner**.`,
+        `Reset **${target.toString()}** from **${prevXp.toLocaleString()} XP** ` +
+          `(Level ${prevLevel}) back to **0 XP** (Level 0).\n` +
+          `Their role has been set to **Beginner**.`,
       );
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -349,39 +340,33 @@ const setLevelCommand: BotCommand = {
         .setMaxValue(100),
     ),
   async execute(interaction) {
+    await interaction.deferReply();
+
     if (!isAdmin(interaction)) {
-      await interaction.reply({
-        content: "You need the **Admin** role to use this command.",
-        ephemeral: true,
-      });
+      await interaction.editReply("You need the **Admin** role to use this command.");
       return;
     }
 
     const target = interaction.options.getUser("user", true);
     const targetLevel = interaction.options.getInteger("level", true);
     const targetXp = xpForLevel(targetLevel);
-
     const prevRecord = getUserXp(target.id);
     const prevXp = prevRecord?.xp ?? 0;
     const delta = targetXp - prevXp;
 
     await adjustXp(target.id, target.username, delta);
-
-    if (interaction.guild) {
-      const member = await fetchMember(interaction.guild, target.id);
-      if (member) await updateRoles(member, targetLevel);
-    }
+    fireRoleUpdate(interaction, target.id, targetLevel);
 
     const embed = new EmbedBuilder()
       .setTitle("Level Set")
       .setColor(0x5865f2)
       .setThumbnail(target.displayAvatarURL())
       .setDescription(
-        `Set **${target.toString()}** to **Level ${targetLevel}** (**${targetXp.toLocaleString()} XP**).` +
-          `\nPrevious: ${prevXp.toLocaleString()} XP (Level ${levelForXp(prevXp)}).`,
+        `Set **${target.toString()}** to **Level ${targetLevel}** (**${targetXp.toLocaleString()} XP**).\n` +
+          `Previous: ${prevXp.toLocaleString()} XP (Level ${levelForXp(prevXp)}).`,
       );
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -392,19 +377,16 @@ const eventXpCommand: BotCommand = {
     .setName("eventxp")
     .setDescription("[Admin] Manage XP multiplier events")
     .addSubcommand((sub) =>
-      sub
-        .setName("start")
-        .setDescription(`Start a ${EVENT_MULTIPLIER}x XP event`),
+      sub.setName("start").setDescription(`Start a ${EVENT_MULTIPLIER}x XP event`),
     )
     .addSubcommand((sub) =>
       sub.setName("stop").setDescription("Stop the current XP event"),
     ),
   async execute(interaction) {
+    await interaction.deferReply();
+
     if (!isAdmin(interaction)) {
-      await interaction.reply({
-        content: "You need the **Admin** role to use this command.",
-        ephemeral: true,
-      });
+      await interaction.editReply("You need the **Admin** role to use this command.");
       return;
     }
 
@@ -412,10 +394,9 @@ const eventXpCommand: BotCommand = {
 
     if (sub === "start") {
       if (isEventActive()) {
-        await interaction.reply({
-          content: `🔥 An XP event is already active (**${EVENT_MULTIPLIER}x** multiplier).`,
-          ephemeral: true,
-        });
+        await interaction.editReply(
+          `🔥 An XP event is already active (**${EVENT_MULTIPLIER}x** multiplier).`,
+        );
         return;
       }
       startEvent();
@@ -423,15 +404,13 @@ const eventXpCommand: BotCommand = {
         .setTitle("🔥 XP Event Started!")
         .setColor(0xff7700)
         .setDescription(
-          `All XP gains are now **${EVENT_MULTIPLIER}x** the normal amount!\n\nChat away to earn boosted XP. Use \`/eventxp stop\` to end the event.`,
+          `All XP gains are now **${EVENT_MULTIPLIER}x** the normal amount!\n\n` +
+            `Chat away to earn boosted XP. Use \`/eventxp stop\` to end the event.`,
         );
-      await interaction.reply({ embeds: [embed] });
-    } else if (sub === "stop") {
+      await interaction.editReply({ embeds: [embed] });
+    } else {
       if (!isEventActive()) {
-        await interaction.reply({
-          content: "There is no active XP event to stop.",
-          ephemeral: true,
-        });
+        await interaction.editReply("There is no active XP event to stop.");
         return;
       }
       stopEvent();
@@ -439,7 +418,7 @@ const eventXpCommand: BotCommand = {
         .setTitle("XP Event Ended")
         .setColor(0x99aab5)
         .setDescription("The XP event has ended. XP is back to **1x** normal.");
-      await interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [embed] });
     }
   },
 };

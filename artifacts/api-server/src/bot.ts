@@ -38,24 +38,24 @@ export async function startBot(token: string): Promise<Client> {
     if (!interaction.isChatInputCommand()) return;
     const command = commandMap.get(interaction.commandName);
     if (!command) {
-      logger.warn(
-        { commandName: interaction.commandName },
-        "Unknown command received",
-      );
+      logger.warn({ commandName: interaction.commandName }, "Unknown command received");
       return;
     }
     try {
       await command.execute(interaction);
     } catch (err) {
-      logger.error(
-        { err, commandName: interaction.commandName },
-        "Command execution failed",
-      );
-      const errorMessage = "Something went wrong running that command.";
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: errorMessage, ephemeral: true });
-      } else {
-        await interaction.reply({ content: errorMessage, ephemeral: true });
+      logger.error({ err, commandName: interaction.commandName }, "Command execution failed");
+      const msg = "Something went wrong running that command.";
+      try {
+        if (interaction.deferred) {
+          await interaction.editReply({ content: msg });
+        } else if (!interaction.replied) {
+          await interaction.reply({ content: msg, ephemeral: true });
+        } else {
+          await interaction.followUp({ content: msg, ephemeral: true });
+        }
+      } catch {
+        /* suppress secondary error */
       }
     }
   });
@@ -66,8 +66,7 @@ export async function startBot(token: string): Promise<Client> {
 
     const result = await awardXp(message.author.id, message.author.username);
 
-    const shouldUpdateRoles = result.leveledUp || result.isFirstMessage;
-    if (shouldUpdateRoles && message.member) {
+    if ((result.leveledUp || result.isFirstMessage) && message.member) {
       updateRoles(message.member, result.newLevel).catch((err) => {
         logger.warn({ err, userId: message.author.id }, "Role update failed");
       });
@@ -81,10 +80,7 @@ export async function startBot(token: string): Promise<Client> {
           );
         }
       } catch (err) {
-        logger.warn(
-          { err, channelId: message.channelId },
-          "Could not send level-up message",
-        );
+        logger.warn({ err, channelId: message.channelId }, "Could not send level-up message");
       }
     }
   });
@@ -97,10 +93,7 @@ export async function startBot(token: string): Promise<Client> {
   return client;
 }
 
-async function registerCommands(
-  token: string,
-  applicationId: string,
-): Promise<void> {
+async function registerCommands(token: string, applicationId: string): Promise<void> {
   const rest = new REST({ version: "10" }).setToken(token);
   const body = commands.map((c) => c.data.toJSON());
   await rest.put(Routes.applicationCommands(applicationId), { body });
