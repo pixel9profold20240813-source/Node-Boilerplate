@@ -20,20 +20,32 @@ pnpm workspace monorepo using TypeScript. The primary artifact is a Discord bot
 
 Located at `artifacts/api-server/`.
 
-- Entry point: `src/index.ts` — boots the bot and a tiny HTTP `/api/healthz`
-  health endpoint on `PORT` (default 8080).
-- `src/bot.ts` — discord.js client setup, slash command registration, message
-  XP awarding, level-up announcements.
-- `src/commands.ts` — slash command definitions: `/level`, `/rank`,
-  `/leaderboard`.
+- `src/index.ts` — boots the bot and a tiny HTTP `/api/healthz` health endpoint on `PORT` (default 8080).
+- `src/bot.ts` — discord.js client setup, slash command registration, message XP awarding, level-up announcements, role assignment.
+- `src/commands.ts` — slash command definitions: `/level`, `/rank`, `/leaderboard`, `/addxp`, `/removexp`, `/xpreset`, `/setlevel`.
 - `src/lib/xp.ts` — XP store, level math, persistence to `data/xp.json`.
+- `src/lib/roles.ts` — role assignment logic (Beginner / Lv2).
+- `src/lib/card.ts` — `@napi-rs/canvas` image generation for profile cards and leaderboard.
 - `src/lib/logger.ts` — pino logger.
 
 ### XP rules
 
-- Awards 15–25 XP per message, with a 60s per-user cooldown.
+- Awards 15–25 XP per message, no cooldown.
 - Level formula: `level = floor(sqrt(xp / 100))`.
 - XP needed for level `n` is `100 * n^2` total.
+
+### Role rewards
+
+- Level < 2: give **Beginner** role, remove **Lv2**.
+- Level >= 2: remove **Beginner**, give **Lv2**.
+- Roles must exist in the Discord server for assignment to work.
+
+### Admin commands (require "Admin" role)
+
+- `/addxp amount [user]` — add XP
+- `/removexp amount [user]` — remove XP
+- `/xpreset user` — wipe XP to 0, reset to Beginner
+- `/setlevel user level` — set exact level (calculates XP automatically)
 
 ### Required secrets
 

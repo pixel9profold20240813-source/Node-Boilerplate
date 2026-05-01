@@ -9,6 +9,7 @@ import {
 } from "discord.js";
 import { commands } from "./commands";
 import { logger } from "./lib/logger";
+import { updateRoles } from "./lib/roles";
 import { awardXp, loadXpStore } from "./lib/xp";
 
 export async function startBot(token: string): Promise<Client> {
@@ -64,6 +65,13 @@ export async function startBot(token: string): Promise<Client> {
     if (!message.guild) return;
 
     const result = await awardXp(message.author.id, message.author.username);
+
+    const shouldUpdateRoles = result.leveledUp || result.isFirstMessage;
+    if (shouldUpdateRoles && message.member) {
+      updateRoles(message.member, result.newLevel).catch((err) => {
+        logger.warn({ err, userId: message.author.id }, "Role update failed");
+      });
+    }
 
     if (result.leveledUp) {
       try {

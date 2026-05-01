@@ -91,6 +91,7 @@ export interface AwardResult {
   previousLevel: number;
   newLevel: number;
   leveledUp: boolean;
+  isFirstMessage: boolean;
 }
 
 export async function awardXp(
@@ -100,6 +101,7 @@ export async function awardXp(
   const now = Date.now();
   const existing = store.users[userId];
   const previousXp = existing?.xp ?? 0;
+  const isFirstMessage = !existing;
   const previousLevel = levelForXp(previousXp);
   const awarded =
     Math.floor(Math.random() * (MAX_AWARD - MIN_AWARD + 1)) + MIN_AWARD;
@@ -121,6 +123,7 @@ export async function awardXp(
     previousLevel,
     newLevel,
     leveledUp: newLevel > previousLevel,
+    isFirstMessage,
   };
 }
 
