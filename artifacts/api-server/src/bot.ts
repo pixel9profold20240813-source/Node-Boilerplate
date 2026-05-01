@@ -27,6 +27,7 @@ export async function startBot(token: string): Promise<Client> {
 
   client.once(Events.ClientReady, async (c) => {
     logger.info({ user: c.user.tag, id: c.user.id }, "Discord bot ready");
+    console.log(`[BOT READY] Logged in as ${c.user.tag}`);
     try {
       await registerCommands(token, c.user.id);
     } catch (err) {
@@ -35,27 +36,46 @@ export async function startBot(token: string): Promise<Client> {
   });
 
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    const command = commandMap.get(interaction.commandName);
-    if (!command) {
-      logger.warn({ commandName: interaction.commandName }, "Unknown command received");
-      return;
-    }
     try {
+      console.log(
+        `[INTERACTION] type=${interaction.type} isChatInput=${interaction.isChatInputCommand()}`,
+      );
+
+      if (!interaction.isChatInputCommand()) return;
+
+      console.log(`INTERACTION RECEIVED: ${interaction.commandName}`);
+
+      await interaction.deferReply();
+
+      const command = commandMap.get(interaction.commandName);
+      if (!command) {
+        logger.warn(
+          { commandName: interaction.commandName },
+          "Unknown command received",
+        );
+        await interaction.editReply("Unknown command.");
+        return;
+      }
+
       await command.execute(interaction);
+
+      console.log(`[COMMAND EXECUTED] ${interaction.commandName}`);
     } catch (err) {
-      logger.error({ err, commandName: interaction.commandName }, "Command execution failed");
-      const msg = "Something went wrong running that command.";
+      console.error("INTERACTION ERROR:", err);
+      logger.error(
+        { err, commandName: interaction.isChatInputCommand() ? interaction.commandName : "?" },
+        "Interaction handler error",
+      );
       try {
-        if (interaction.deferred) {
-          await interaction.editReply({ content: msg });
-        } else if (!interaction.replied) {
-          await interaction.reply({ content: msg, ephemeral: true });
-        } else {
-          await interaction.followUp({ content: msg, ephemeral: true });
+        if (interaction.isChatInputCommand()) {
+          if (interaction.deferred) {
+            await interaction.editReply("系統錯誤");
+          } else if (!interaction.replied) {
+            await interaction.reply({ content: "系統錯誤", ephemeral: true });
+          }
         }
       } catch {
-        /* suppress secondary error */
+        /* suppress */
       }
     }
   });
@@ -80,22 +100,30 @@ export async function startBot(token: string): Promise<Client> {
           );
         }
       } catch (err) {
-        logger.warn({ err, channelId: message.channelId }, "Could not send level-up message");
+        logger.warn(
+          { err, channelId: message.channelId },
+          "Could not send level-up message",
+        );
       }
     }
   });
 
   client.on(Events.Error, (err) => {
     logger.error({ err }, "Discord client error");
+    console.error("[CLIENT ERROR]", err);
   });
 
   await client.login(token);
   return client;
 }
 
-async function registerCommands(token: string, applicationId: string): Promise<void> {
+async function registerCommands(
+  token: string,
+  applicationId: string,
+): Promise<void> {
   const rest = new REST({ version: "10" }).setToken(token);
   const body = commands.map((c) => c.data.toJSON());
   await rest.put(Routes.applicationCommands(applicationId), { body });
   logger.info({ count: body.length }, "Registered global slash commands");
+  console.log(`[COMMANDS] Registered ${body.length} global slash commands`);
 }

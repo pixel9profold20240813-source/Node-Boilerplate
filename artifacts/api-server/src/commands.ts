@@ -68,8 +68,6 @@ const levelCommand: BotCommand = {
         .setRequired(false),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     const target = interaction.options.getUser("user") ?? interaction.user;
     const record = getUserXp(target.id);
 
@@ -111,8 +109,6 @@ const rankCommand: BotCommand = {
     .setName("rank")
     .setDescription("Show your rank card"),
   async execute(interaction) {
-    await interaction.deferReply();
-
     const record = getUserXp(interaction.user.id);
     if (!record) {
       await interaction.editReply({
@@ -138,7 +134,9 @@ const rankCommand: BotCommand = {
       xpNeededForNext,
     });
 
-    const attachment = new AttachmentBuilder(cardBuffer, { name: "rank-card.png" });
+    const attachment = new AttachmentBuilder(cardBuffer, {
+      name: "rank-card.png",
+    });
 
     const eventBanner = isEventActive()
       ? `🔥 **XP Event Active: ${EVENT_MULTIPLIER}x Boost!**`
@@ -155,8 +153,6 @@ const leaderboardCommand: BotCommand = {
     .setName("leaderboard")
     .setDescription("Show the top XP earners with a visual leaderboard"),
   async execute(interaction) {
-    await interaction.deferReply();
-
     const top = getLeaderboard(10);
     if (top.length === 0) {
       await interaction.editReply("No XP has been earned yet. Be the first!");
@@ -174,12 +170,20 @@ const leaderboardCommand: BotCommand = {
         } catch {
           /* use default */
         }
-        return { rank: u.rank, username: u.username, avatarUrl, level: u.level, xp: u.xp };
+        return {
+          rank: u.rank,
+          username: u.username,
+          avatarUrl,
+          level: u.level,
+          xp: u.xp,
+        };
       }),
     );
 
     const cardBuffer = await generateLeaderboardCard({ entries });
-    const attachment = new AttachmentBuilder(cardBuffer, { name: "leaderboard.png" });
+    const attachment = new AttachmentBuilder(cardBuffer, {
+      name: "leaderboard.png",
+    });
 
     await interaction.editReply({ files: [attachment] });
   },
@@ -206,10 +210,10 @@ const addXpCommand: BotCommand = {
         .setRequired(false),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     if (!isAdmin(interaction)) {
-      await interaction.editReply("You need the **Admin** role to use this command.");
+      await interaction.editReply(
+        "You need the **Admin** role to use this command.",
+      );
       return;
     }
 
@@ -254,10 +258,10 @@ const removeXpCommand: BotCommand = {
         .setRequired(false),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     if (!isAdmin(interaction)) {
-      await interaction.editReply("You need the **Admin** role to use this command.");
+      await interaction.editReply(
+        "You need the **Admin** role to use this command.",
+      );
       return;
     }
 
@@ -293,10 +297,10 @@ const xpResetCommand: BotCommand = {
       opt.setName("user").setDescription("The user to reset").setRequired(true),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     if (!isAdmin(interaction)) {
-      await interaction.editReply("You need the **Admin** role to use this command.");
+      await interaction.editReply(
+        "You need the **Admin** role to use this command.",
+      );
       return;
     }
 
@@ -340,10 +344,10 @@ const setLevelCommand: BotCommand = {
         .setMaxValue(100),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     if (!isAdmin(interaction)) {
-      await interaction.editReply("You need the **Admin** role to use this command.");
+      await interaction.editReply(
+        "You need the **Admin** role to use this command.",
+      );
       return;
     }
 
@@ -383,10 +387,10 @@ const eventXpCommand: BotCommand = {
       sub.setName("stop").setDescription("Stop the current XP event"),
     ),
   async execute(interaction) {
-    await interaction.deferReply();
-
     if (!isAdmin(interaction)) {
-      await interaction.editReply("You need the **Admin** role to use this command.");
+      await interaction.editReply(
+        "You need the **Admin** role to use this command.",
+      );
       return;
     }
 
@@ -417,7 +421,9 @@ const eventXpCommand: BotCommand = {
       const embed = new EmbedBuilder()
         .setTitle("XP Event Ended")
         .setColor(0x99aab5)
-        .setDescription("The XP event has ended. XP is back to **1x** normal.");
+        .setDescription(
+          "The XP event has ended. XP is back to **1x** normal.",
+        );
       await interaction.editReply({ embeds: [embed] });
     }
   },
