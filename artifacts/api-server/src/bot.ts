@@ -10,7 +10,7 @@ import {
 import { commands } from "./commands";
 import { logger } from "./lib/logger";
 import { updateRoles } from "./lib/roles";
-import { awardXp, loadXpStore } from "./lib/xp";
+import { awardXp, forceFlush, loadXpStore } from "./lib/xp";
 
 const INTERACTION_TIMEOUT_MS = 3000;
 
@@ -35,6 +35,25 @@ export async function startBot(token: string): Promise<Client> {
     } catch (err) {
       logger.error({ err }, "Failed to register slash commands");
     }
+  });
+
+  client.on(Events.ShardReady, (id) => {
+    console.log(`[SHARD READY] shard=${id}`);
+  });
+
+  client.on(Events.ShardDisconnect, (event, id) => {
+    console.error(`[SHARD DISCONNECT] shard=${id} code=${event.code}`);
+    logger.warn({ shardId: id, code: event.code }, "Shard disconnected");
+  });
+
+  client.on(Events.ShardReconnecting, (id) => {
+    console.log(`[SHARD RECONNECTING] shard=${id}`);
+    logger.info({ shardId: id }, "Shard reconnecting");
+  });
+
+  client.on(Events.ShardResume, (id, replayed) => {
+    console.log(`[SHARD RESUME] shard=${id} replayed=${replayed}`);
+    logger.info({ shardId: id, replayed }, "Shard resumed");
   });
 
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {
@@ -103,7 +122,7 @@ export async function startBot(token: string): Promise<Client> {
     if (!message.guild) return;
 
     try {
-      const result = await awardXp(message.author.id, message.author.username);
+      const result = awardXp(message.author.id, message.author.username);
 
       if ((result.leveledUp || result.isFirstMessage) && message.member) {
         setImmediate(() => {
@@ -116,9 +135,14 @@ export async function startBot(token: string): Promise<Client> {
       if (result.leveledUp) {
         if (message.channel.isSendable()) {
           message.channel
-            .send(`🎉 ${message.author.toString()} just reached **level ${result.newLevel}**!`)
+            .send(
+              `🎉 ${message.author.toString()} just reached **level ${result.newLevel}**!`,
+            )
             .catch((err) => {
-              logger.warn({ err, channelId: message.channelId }, "Could not send level-up message");
+              logger.warn(
+                { err, channelId: message.channelId },
+                "Could not send level-up message",
+              );
             });
         }
       }
@@ -131,6 +155,19 @@ export async function startBot(token: string): Promise<Client> {
     logger.error({ err }, "Discord client error");
     console.error("[CLIENT ERROR]", err);
   });
+
+  const shutdown = async (signal: string): Promise<void> => {
+    logger.info({ signal }, "Graceful shutdown: flushing XP");
+    console.log(`[SHUTDOWN] ${signal} — flushing XP store`);
+    try {
+      await forceFlush();
+    } catch (err) {
+      console.error("[SHUTDOWN] Flush failed:", err);
+    }
+  };
+
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 
   await client.login(token);
   return client;

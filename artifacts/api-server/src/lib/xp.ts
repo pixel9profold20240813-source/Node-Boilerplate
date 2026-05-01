@@ -16,46 +16,105 @@ interface XpStoreShape {
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "xp.json");
+const TMP_FILE = `${DATA_FILE}.tmp`;
 
 const MIN_AWARD = 15;
 const MAX_AWARD = 25;
 
+const FLUSH_INTERVAL_MS = 5_000;
+const FS_TIMEOUT_MS = 8_000;
+const WATCHDOG_MS = 15_000;
+
 let store: XpStoreShape = { users: {} };
-let writeQueue: Promise<void> = Promise.resolve();
+let dirty = false;
+let flushing = false;
+let flushStartedAt = 0;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function fsWithTimeout<T>(op: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    op,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`FS timeout: ${label}`)),
+        FS_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
+
+async function flushNow(): Promise<void> {
+  if (flushing) {
+    const elapsed = Date.now() - flushStartedAt;
+    if (elapsed > WATCHDOG_MS) {
+      logger.warn({ elapsed }, "XP flush watchdog: resetting stuck flush");
+      flushing = false;
+    } else {
+      return;
+    }
+  }
+  if (!dirty) return;
+
+  flushing = true;
+  flushStartedAt = Date.now();
+  dirty = false;
+
+  try {
+    const json = JSON.stringify(store, null, 2);
+    await fsWithTimeout(fs.writeFile(TMP_FILE, json, "utf8"), "writeFile");
+    await fsWithTimeout(fs.rename(TMP_FILE, DATA_FILE), "rename");
+  } catch (err) {
+    dirty = true;
+    logger.error({ err }, "Failed to flush XP store");
+  } finally {
+    flushing = false;
+  }
+}
+
+function schedulePersist(): void {
+  dirty = true;
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushNow().catch((err) => {
+      logger.error({ err }, "schedulePersist flush error");
+    });
+  }, FLUSH_INTERVAL_MS);
+}
 
 export async function loadXpStore(): Promise<void> {
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
-    const raw = await fs.readFile(DATA_FILE, "utf8");
+    const raw = await fsWithTimeout(fs.readFile(DATA_FILE, "utf8"), "readFile");
     const parsed = JSON.parse(raw) as Partial<XpStoreShape>;
     store = { users: parsed.users ?? {} };
-    logger.info(
-      { users: Object.keys(store.users).length },
-      "Loaded XP store",
-    );
+    logger.info({ users: Object.keys(store.users).length }, "Loaded XP store");
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       logger.info("No existing XP store found; starting fresh");
       store = { users: {} };
-      await persist();
+      schedulePersist();
     } else {
       logger.error({ err }, "Failed to load XP store");
       throw err;
     }
   }
+
+  setInterval(() => {
+    if (dirty && !flushing) {
+      flushNow().catch((err) => {
+        logger.error({ err }, "Periodic flush error");
+      });
+    }
+  }, FLUSH_INTERVAL_MS * 2);
 }
 
-function persist(): Promise<void> {
-  writeQueue = writeQueue
-    .then(async () => {
-      const tmp = `${DATA_FILE}.tmp`;
-      await fs.writeFile(tmp, JSON.stringify(store, null, 2), "utf8");
-      await fs.rename(tmp, DATA_FILE);
-    })
-    .catch((err) => {
-      logger.error({ err }, "Failed to persist XP store");
-    });
-  return writeQueue;
+export async function forceFlush(): Promise<void> {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  await flushNow();
 }
 
 export function levelForXp(xp: number): number {
@@ -97,10 +156,7 @@ export interface AwardResult {
   isFirstMessage: boolean;
 }
 
-export async function awardXp(
-  userId: string,
-  username: string,
-): Promise<AwardResult> {
+export function awardXp(userId: string, username: string): AwardResult {
   const now = Date.now();
   const existing = store.users[userId];
   const previousXp = existing?.xp ?? 0;
@@ -120,7 +176,7 @@ export async function awardXp(
     lastAwardedAt: now,
   };
 
-  await persist();
+  schedulePersist();
 
   return {
     awarded,
@@ -161,7 +217,7 @@ export async function adjustXp(
     lastAwardedAt: existing?.lastAwardedAt ?? Date.now(),
   };
 
-  await persist();
+  await forceFlush();
 
   return {
     delta,
