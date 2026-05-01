@@ -16,7 +16,6 @@ interface XpStoreShape {
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "xp.json");
 
-const COOLDOWN_MS = 60_000;
 const MIN_AWARD = 15;
 const MAX_AWARD = 25;
 
@@ -97,14 +96,9 @@ export interface AwardResult {
 export async function awardXp(
   userId: string,
   username: string,
-): Promise<AwardResult | null> {
+): Promise<AwardResult> {
   const now = Date.now();
   const existing = store.users[userId];
-
-  if (existing && now - existing.lastAwardedAt < COOLDOWN_MS) {
-    return null;
-  }
-
   const previousXp = existing?.xp ?? 0;
   const previousLevel = levelForXp(previousXp);
   const awarded =
@@ -127,6 +121,45 @@ export async function awardXp(
     previousLevel,
     newLevel,
     leveledUp: newLevel > previousLevel,
+  };
+}
+
+export interface AdjustResult {
+  delta: number;
+  totalXp: number;
+  previousLevel: number;
+  newLevel: number;
+  leveledUp: boolean;
+  leveledDown: boolean;
+}
+
+export async function adjustXp(
+  userId: string,
+  username: string,
+  delta: number,
+): Promise<AdjustResult> {
+  const existing = store.users[userId];
+  const previousXp = existing?.xp ?? 0;
+  const previousLevel = levelForXp(previousXp);
+  const totalXp = Math.max(0, previousXp + delta);
+  const newLevel = levelForXp(totalXp);
+
+  store.users[userId] = {
+    userId,
+    username,
+    xp: totalXp,
+    lastAwardedAt: existing?.lastAwardedAt ?? Date.now(),
+  };
+
+  await persist();
+
+  return {
+    delta,
+    totalXp,
+    previousLevel,
+    newLevel,
+    leveledUp: newLevel > previousLevel,
+    leveledDown: newLevel < previousLevel,
   };
 }
 

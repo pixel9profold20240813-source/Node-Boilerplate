@@ -64,7 +64,6 @@ export async function startBot(token: string): Promise<Client> {
     if (!message.guild) return;
 
     const result = await awardXp(message.author.id, message.author.username);
-    if (!result) return;
 
     if (result.leveledUp) {
       try {

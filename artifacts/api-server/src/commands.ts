@@ -1,16 +1,26 @@
 import {
   type ChatInputCommandInteraction,
   EmbedBuilder,
+  GuildMember,
   SlashCommandBuilder,
   type SlashCommandOptionsOnlyBuilder,
 } from "discord.js";
 import {
+  adjustXp,
   getLeaderboard,
   getUserRank,
   getUserXp,
   levelForXp,
   progressForXp,
 } from "./lib/xp";
+
+function isAdmin(interaction: ChatInputCommandInteraction): boolean {
+  const member = interaction.member;
+  if (!(member instanceof GuildMember)) return false;
+  return member.roles.cache.some(
+    (r) => r.name.toLowerCase() === "admin",
+  );
+}
 
 export interface BotCommand {
   data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
@@ -117,6 +127,96 @@ const leaderboardCommand: BotCommand = {
   },
 };
 
+const addXpCommand: BotCommand = {
+  data: new SlashCommandBuilder()
+    .setName("addxp")
+    .setDescription("[Admin] Add XP to yourself or another user")
+    .addIntegerOption((opt) =>
+      opt
+        .setName("amount")
+        .setDescription("Amount of XP to add (1–100000)")
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(100_000),
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("user")
+        .setDescription("Target user (defaults to you)")
+        .setRequired(false),
+    ),
+  async execute(interaction) {
+    if (!isAdmin(interaction)) {
+      await interaction.reply({
+        content: "You need the **Admin** role to use this command.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const target = interaction.options.getUser("user") ?? interaction.user;
+    const amount = interaction.options.getInteger("amount", true);
+    const result = await adjustXp(target.id, target.username, amount);
+
+    const embed = new EmbedBuilder()
+      .setTitle("XP Added")
+      .setColor(0x57f287)
+      .setDescription(
+        `Added **+${amount} XP** to ${target.toString()}.\n` +
+          `New total: **${result.totalXp} XP** (Level **${result.newLevel}**)` +
+          (result.leveledUp ? ` 🎉 Level up!` : ""),
+      );
+
+    await interaction.reply({ embeds: [embed] });
+  },
+};
+
+const removeXpCommand: BotCommand = {
+  data: new SlashCommandBuilder()
+    .setName("removexp")
+    .setDescription("[Admin] Remove XP from yourself or another user")
+    .addIntegerOption((opt) =>
+      opt
+        .setName("amount")
+        .setDescription("Amount of XP to remove (1–100000)")
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(100_000),
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("user")
+        .setDescription("Target user (defaults to you)")
+        .setRequired(false),
+    ),
+  async execute(interaction) {
+    if (!isAdmin(interaction)) {
+      await interaction.reply({
+        content: "You need the **Admin** role to use this command.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const target = interaction.options.getUser("user") ?? interaction.user;
+    const amount = interaction.options.getInteger("amount", true);
+    const result = await adjustXp(target.id, target.username, -amount);
+
+    const actualRemoved = amount - Math.max(0, amount - (result.totalXp + amount));
+
+    const embed = new EmbedBuilder()
+      .setTitle("XP Removed")
+      .setColor(0xed4245)
+      .setDescription(
+        `Removed **-${actualRemoved} XP** from ${target.toString()}.\n` +
+          `New total: **${result.totalXp} XP** (Level **${result.newLevel}**)` +
+          (result.leveledDown ? ` ⬇️ Level down.` : ""),
+      );
+
+    await interaction.reply({ embeds: [embed] });
+  },
+};
+
 function renderProgressBar(current: number, total: number, width = 20): string {
   if (total <= 0) return `${current} XP`;
   const ratio = Math.max(0, Math.min(1, current / total));
@@ -130,4 +230,6 @@ export const commands: BotCommand[] = [
   levelCommand,
   rankCommand,
   leaderboardCommand,
+  addXpCommand,
+  removeXpCommand,
 ];
