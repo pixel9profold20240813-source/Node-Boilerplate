@@ -1,7 +1,8 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { logger } from "./logger";
 import { getMultiplier } from "./multiplier";
+import pg from "pg";
+
+const { Pool } = pg;
 
 export interface UserXp {
   userId: string;
@@ -14,15 +15,10 @@ interface XpStoreShape {
   users: Record<string, UserXp>;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "xp.json");
-const TMP_FILE = `${DATA_FILE}.tmp`;
-
 const MIN_AWARD = 15;
 const MAX_AWARD = 25;
 
 const FLUSH_INTERVAL_MS = 5_000;
-const FS_TIMEOUT_MS = 8_000;
 const WATCHDOG_MS = 15_000;
 
 let store: XpStoreShape = { users: {} };
@@ -31,23 +27,17 @@ let flushing = false;
 let flushStartedAt = 0;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function fsWithTimeout<T>(op: Promise<T>, label: string): Promise<T> {
-  return Promise.race([
-    op,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`FS timeout: ${label}`)),
-        FS_TIMEOUT_MS,
-      ),
-    ),
-  ]);
-}
+// 建立資料庫連線池
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 async function flushNow(): Promise<void> {
   if (flushing) {
     const elapsed = Date.now() - flushStartedAt;
     if (elapsed > WATCHDOG_MS) {
-      logger.warn({ elapsed }, "XP flush watchdog: resetting stuck flush");
+      logger.warn({ elapsed }, "XP 儲存監視器：正在重設卡住的程序");
       flushing = false;
     } else {
       return;
@@ -55,17 +45,31 @@ async function flushNow(): Promise<void> {
   }
   if (!dirty) return;
 
+  if (!process.env.DATABASE_URL) {
+    logger.warn("未偵測到 DATABASE_URL，XP 將無法永久儲存");
+    dirty = false;
+    return;
+  }
+
   flushing = true;
   flushStartedAt = Date.now();
   dirty = false;
 
   try {
-    const json = JSON.stringify(store, null, 2);
-    await fsWithTimeout(fs.writeFile(TMP_FILE, json, "utf8"), "writeFile");
-    await fsWithTimeout(fs.rename(TMP_FILE, DATA_FILE), "rename");
+    const users = Object.values(store.users);
+    for (const u of users) {
+      // 將資料寫入 Neon 資料庫，如果 ID 重複則更新數據
+      await pool.query(
+        `INSERT INTO users_xp (user_id, username, xp, last_awarded_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id) DO UPDATE
+         SET username = EXCLUDED.username, xp = EXCLUDED.xp, last_awarded_at = EXCLUDED.last_awarded_at`,
+        [u.userId, u.username, u.xp, u.lastAwardedAt]
+      );
+    }
   } catch (err) {
     dirty = true;
-    logger.error({ err }, "Failed to flush XP store");
+    logger.error({ err }, "寫入資料庫失敗");
   } finally {
     flushing = false;
   }
@@ -77,33 +81,50 @@ function schedulePersist(): void {
   flushTimer = setTimeout(() => {
     flushTimer = null;
     flushNow().catch((err) => {
-      logger.error({ err }, "schedulePersist flush error");
+      logger.error({ err }, "定時存檔發生錯誤");
     });
   }, FLUSH_INTERVAL_MS);
 }
 
 export async function loadXpStore(): Promise<void> {
+  if (!process.env.DATABASE_URL) {
+    logger.warn("找不到 DATABASE_URL，機器人將使用臨時記憶啟動");
+    store = { users: {} };
+    return;
+  }
+
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const raw = await fsWithTimeout(fs.readFile(DATA_FILE, "utf8"), "readFile");
-    const parsed = JSON.parse(raw) as Partial<XpStoreShape>;
-    store = { users: parsed.users ?? {} };
-    logger.info({ users: Object.keys(store.users).length }, "Loaded XP store");
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      logger.info("No existing XP store found; starting fresh");
-      store = { users: {} };
-      schedulePersist();
-    } else {
-      logger.error({ err }, "Failed to load XP store");
-      throw err;
+    // 啟動時自動建立資料表（如果還不存在的話）
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users_xp (
+        user_id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        xp INTEGER NOT NULL DEFAULT 0,
+        last_awarded_at BIGINT NOT NULL
+      )
+    `);
+
+    // 從資料庫載入所有 XP 數據
+    const res = await pool.query('SELECT * FROM users_xp');
+    store = { users: {} };
+    for (const row of res.rows) {
+      store.users[row.user_id] = {
+        userId: row.user_id,
+        username: row.username,
+        xp: row.xp,
+        lastAwardedAt: parseInt(row.last_awarded_at, 10)
+      };
     }
+    logger.info({ users: Object.keys(store.users).length }, "成功從雲端資料庫載入 XP 資料");
+  } catch (err) {
+    logger.error({ err }, "讀取資料庫失敗，將使用全新狀態啟動");
+    store = { users: {} };
   }
 
   setInterval(() => {
     if (dirty && !flushing) {
       flushNow().catch((err) => {
-        logger.error({ err }, "Periodic flush error");
+        logger.error({ err }, "週期性存檔錯誤");
       });
     }
   }, FLUSH_INTERVAL_MS * 2);
