@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
+    "drizzle-orm": "^0.29.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "@napi-rs/canvas": "^0.1.53"
   },
   "devDependencies": {
     "@types/node": "^20.11.17",
