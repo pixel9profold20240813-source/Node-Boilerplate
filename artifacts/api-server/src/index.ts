@@ -29,11 +29,21 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const healthServer = http.createServer((req, res) => {
+  // 原本的 Health Check 路徑保持不變
   if (req.url === "/api/healthz" || req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", users: getTotalUsers() }));
     return;
   }
+  
+  // 新增：防睡死總機，處理首頁 (/) 的敲門請求
+  if (req.url === "/") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is awake and working!\n");
+    return;
+  }
+
+  // 其他亂打的路徑才給 404
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
